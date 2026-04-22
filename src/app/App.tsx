@@ -223,36 +223,75 @@ export default function App() {
       let checkFn: (() => boolean) | null = null;
       let fileNameDesc = '';
 
+      // --- 智能识别文件特征，用于交叉校验 ---
+      const isPurchaseOrder = headers.includes('门店名称') || headers.includes('物料编码') || headers.includes('门店收货人');
+      const isTemplate = wb.SheetNames.includes('货品') || headers.includes('货品名称');
+      const isJike = headers.includes('物流单号') && headers.includes('收货人');
+      const isTrackingTarget = headers.includes('快递单号') && headers.includes('快递公司');
+      const isPriceTable = headers.includes('省份') || allContentStr.includes('淘宝');
+      const isShangsongInput = allContentStr.includes('订单') || /\d{6}-\d+/.test(allContentStr);
+
       if (idKey.startsWith('f-main-s')) {
         const sNum = parseInt(idKey.slice(-1));
-        if (sNum === 1) { reqHeaders = ['门店名称', '门店编码', '物料编码']; fileNameDesc = '【第1步主表】 厂家直发采购订单.xlsx'; }
-        else if (sNum === 2) { checkFn = () => allContentStr.includes('门店名称') || allContentStr.includes('门店编号'); fileNameDesc = '【第2步主表】 福鹿家提取后门店.xlsx'; }
-        else if (sNum === 3) { reqHeaders = ['OMS厂家直发单号', '快递单号']; fileNameDesc = '【第3步主表】 厂家直发采购快递单.xlsx'; }
+        if (sNum === 1) {
+          if (isTemplate) { showError('上传位置错误', '检测到这是【模板文件】，请在此处上传正确的：【厂家直发采购订单】'); return false; }
+          if (isJike || isTrackingTarget) { showError('上传位置错误', '检测到这是【单号/回填表】，请在此处上传正确的：【厂家直发采购订单】'); return false; }
+          reqHeaders = ['门店名称', '门店编码', '物料编码']; fileNameDesc = '厂家直发采购订单.xlsx';
+        }
+        else if (sNum === 2) {
+          if (isPurchaseOrder || isTemplate) { showError('上传位置错误', '检测到这是【原始订单/模板】，第 2 步应上传第 1 步生成的【门店结果文件】'); return false; }
+          checkFn = () => allContentStr.includes('门店名称') || allContentStr.includes('门店编号'); fileNameDesc = '福鹿家提取后门店.xlsx';
+        }
+        else if (sNum === 3) {
+          // 回填目标表：特征是必须有 OMS单号 + 快递单号 + 快递公司
+          const isTarget = headers.includes('OMS厂家直发单号') && headers.includes('快递单号') && headers.includes('快递公司');
+          const isSource = headers.includes('OMS厂家直发单号') && headers.includes('门店收货人');
+          
+          if (isSource && !isTarget) {
+            showError('上传位置错误', '检测到您在此处上传了【采购订单/数据源】，请在此处上传【厂家直发采购快递单】（回填目标表）');
+            return false;
+          }
+          reqHeaders = ['OMS厂家直发单号', '快递单号', '快递公司']; fileNameDesc = '厂家直发采购快递单.xlsx';
+        }
       } else if (idKey === 'f-hist') {
-        checkFn = () => allContentStr.includes('编号') || allContentStr.includes('编码'); fileNameDesc = '【查重文件】 福鹿家总发货记录.xlsx';
+        checkFn = () => allContentStr.includes('编号') || allContentStr.includes('编码'); fileNameDesc = '福鹿家总发货记录.xlsx';
       } else if (idKey === 'f-tpl' || idKey === 's-tpl') {
-        checkFn = () => wb.SheetNames.includes('货品') || headers.includes('货品名称'); fileNameDesc = '【模板文件】 订单分表模版.xlsx';
+        if (isPurchaseOrder) { showError('上传位置错误', '检测到这是【采购订单】，请在此处上传正确的：【订单分表模版】'); return false; }
+        checkFn = () => wb.SheetNames.includes('货品') || headers.includes('货品名称'); fileNameDesc = '订单分表模版.xlsx';
       } else if (idKey === 'f-order') {
-        reqHeaders = ['OMS厂家直发单号', '门店收货人']; fileNameDesc = '【关联文件】 厂家直发采购订单.xlsx';
+        // 数据源表：特征是有 OMS单号 + 门店收货人，且没有快递公司列
+        const isTarget = headers.includes('OMS厂家直发单号') && headers.includes('快递单号') && headers.includes('快递公司');
+        if (isTarget) {
+          showError('上传位置错误', '检测到您在此处上传了【回填目标表】，请在此处上传正确的：【厂家直发采购订单】（作为匹配数据源）');
+          return false;
+        }
+        reqHeaders = ['OMS厂家直发单号', '门店收货人']; fileNameDesc = '厂家直发采购订单.xlsx';
       } else if (idKey === 'f-jike') {
-        reqHeaders = ['收货人', '物流单号']; fileNameDesc = '【单号源】 快递单号-吉客云.xlsx';
+        if (isPurchaseOrder || isTemplate) { showError('上传位置错误', '此处应上传【吉客云单号表】，请检查文件内容。'); return false; }
+        reqHeaders = ['收货人', '物流单号']; fileNameDesc = '快递单号-吉客云.xlsx';
+        checkFn = () => headers.length >= 5;
       } else if (idKey === 'f-menu') {
-        checkFn = () => /KY|DPK|SF|YT|ZTO|STO|JT/i.test(allContentStr); fileNameDesc = '【单号源】 快递单号-菜单屏.xlsx';
+        if (isJike) { showError('上传位置错误', '检测到这是【吉客云单号表】，请将其上传到“吉客云”位置。此处应上传：【菜单屏单号】'); return false; }
+        checkFn = () => /KY|DPK|SF|YT|ZTO|STO|JT/i.test(allContentStr);
+        fileNameDesc = '快递单号-菜单屏.xlsx';
       } else if (idKey === 's-main-input') {
-        checkFn = () => allContentStr.includes('订单') || /\d{6}-\d+/.test(allContentStr) || /\d{12,}/.test(allContentStr); fileNameDesc = '【商颂主表】 客户发来的下单记录';
+        if (isPurchaseOrder || isTemplate) { showError('上传位置错误', '检测到这是【福鹿家文件】，请在此处上传正确的：【商颂下单记录文件】'); return false; }
+        checkFn = () => allContentStr.includes('订单') || /\d{6}-\d+/.test(allContentStr) || /\d{12,}/.test(allContentStr);
+        fileNameDesc = '商颂下单记录文件';
       } else if (idKey === 's-price') {
-        checkFn = () => allContentStr.includes('淘宝') || allContentStr.includes('省份'); fileNameDesc = '【规则文件】 快递价格明细表.xls';
+        if (isPurchaseOrder || isTemplate) { showError('上传位置错误', '此处应上传【快递价格明细表】，请勿上传订单文件。'); return false; }
+        checkFn = () => headers.includes('省份') || allContentStr.includes('淘宝'); fileNameDesc = '快递价格明细表.xls';
       }
 
       if (reqHeaders.length > 0) {
         const missing = reqHeaders.filter(h => !headers.includes(h));
         if (missing.length > 0) {
-          showError(`文件格式不匹配：缺少列 "${missing.join(', ')}"`, `当前需要上传：${fileNameDesc}`);
+          showError(`文件格式错误`, `该位置的文件必须包含以下列：\n"${missing.join(', ')}"\n\n请上传正确的：${fileNameDesc}`);
           return false;
         }
       }
       if (checkFn && !checkFn()) {
-        showError('文件内容不匹配', `当前需要上传：${fileNameDesc}`);
+        showError('文件内容校验失败', `该文件的内容特征不符合要求。\n\n请检查并上传正确的：${fileNameDesc}`);
         return false;
       }
       return true;
@@ -436,7 +475,18 @@ export default function App() {
       const wb = await getWorkbook('f-main-s2');
       if (wb) {
         stores = [];
-        const raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 }) as any[][];
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const raw = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
+        const headers = raw[0] ? raw[0].map(h => String(h).trim()) : [];
+
+        // 增加文件类型交叉检查
+        const isPurchaseOrder = headers.includes('物料编码') || headers.includes('物料名称');
+        if (isPurchaseOrder) {
+          log(`[解析中断] 检测到上传的是原始【采购订单】，第 2 步需要上传的是第 1 步生成的【门店结果文件】`, 'error');
+          showError('上传文件类型错误', '您在第 2 步上传了原始采购订单。请先执行第 1 步并下载结果，或在此处上传正确的“提取福鹿家门店...xlsx”文件。');
+          return;
+        }
+
         raw.forEach(r => {
           const text = String(r[0] || '');
           if (!text.includes('门店名称')) return;
@@ -454,11 +504,13 @@ export default function App() {
             });
           }
         });
+
         if (stores.length > 0) {
-          log(`[解析成功] 从文件中识别出 ${stores.length} 家门店`, 'success');
+          log(`[解析成功] 从手动文件中识别出 ${stores.length} 家门店`, 'success');
         } else {
-          log('[解析失败] 上传的文件格式不正确', 'error');
-          stores = null;
+          log(`[解析失败] 无法从 ${manualFile.name} 中提取出门店信息。请确保文件格式是由第 1 步生成的。`, 'error');
+          showError('解析失败', '手动上传的文件格式不正确，无法读取门店列表。系统已停止执行以防止数据混淆。');
+          return; // 显式停止，不再回退到内存
         }
       }
     }
@@ -467,7 +519,7 @@ export default function App() {
     if (!stores) {
       stores = memExtractedStoresRef.current;
       if (stores && stores.length > 0) {
-        log(`[内存复用] 检测到第 1 步生成的 ${stores.length} 家门店结果（首店：${stores[0].storeName}），直接使用`, 'success');
+        log(`[内存复用] 使用第 1 步实时生成的 ${stores.length} 家门店数据`, 'success');
       }
     }
 
@@ -563,14 +615,28 @@ export default function App() {
 
     const menuMap: Record<string, string> = {};
     if (wbMenu) {
-      const reg1 = /^(.+?)(KY|DPK|SF|YT|ZTO|STO|HTKY|JT[A-Za-z0-9]+)$/i;
-      const reg2 = /^(KY|DPK|SF|YT|ZTO|STO|HTKY|JT[A-Za-z0-9]+)(.+)$/i;
+      // 修正正则表达式：允许所有前缀后跟随字母数字，且支持姓名+单号或单号+姓名的组合
+      const reg1 = /^(.+?)((?:KY|DPK|SF|YT|ZTO|STO|HTKY|JT)[A-Za-z0-9]+)$/i;
+      const reg2 = /^((?:KY|DPK|SF|YT|ZTO|STO|HTKY|JT)[A-Za-z0-9]+)(.+)$/i;
+
       (XLSX.utils.sheet_to_json(wbMenu.Sheets[wbMenu.SheetNames[0]], { header: 1 }) as any[][]).forEach(r => {
-        const val = String(r[0] || '').trim();
-        let m = val.match(reg1);
+        if (!r || r.length === 0) return;
+        const col0 = String(r[0] || '').trim();
+        const col1 = String(r[1] || '').trim();
+
+        // 优先尝试单列合并格式 (如 "张三SF123456")
+        let m = col0.match(reg1);
         if (m) { menuMap[m[1].trim()] = m[2].trim(); return; }
-        m = val.match(reg2);
+        m = col0.match(reg2);
         if (m) { menuMap[m[2].trim()] = m[1].trim(); return; }
+
+        // 尝试双列格式 (A列姓名，B列单号 或 反之)
+        const isTrack = (s: string) => /^(KY|DPK|SF|YT|ZTO|STO|HTKY|JT)[A-Za-z0-9]+$/i.test(s);
+        if (isTrack(col1) && col0 && !isTrack(col0)) {
+          menuMap[col0] = col1;
+        } else if (isTrack(col0) && col1 && !isTrack(col1)) {
+          menuMap[col1] = col0;
+        }
       });
     }
 
@@ -590,6 +656,7 @@ export default function App() {
     const idxOms = head.indexOf('OMS厂家直发单号');
     const idxTrack = head.indexOf('快递单号');
     const idxCo = head.indexOf('快递公司');
+    const idxMatCode = head.indexOf('物料编码');
     if (idxOms === -1 || idxTrack === -1 || idxCo === -1) { showError('目标表缺少必要的列 (OMS/快递单号/快递公司)'); return; }
 
     // Pre-scan for duplicate OMS numbers in the target file
@@ -612,11 +679,28 @@ export default function App() {
       const info = orderMap[oms];
       let track = ''; let co = ''; let status = '未找到';
       if (info) {
-        const isMenu = info.mat.includes('电子菜单屏') || String(wsT[XLSX.utils.encode_cell({ r, c: head.indexOf('物料编码') })]?.v).includes('F360015');
-        track = isMenu ? menuMap[info.name] : jikeMap[info.name];
-        if (track) { co = parseCo(track); status = '匹配成功'; okCnt++; wsT[XLSX.utils.encode_cell({ r, c: idxTrack })] = { v: track, t: 's' }; wsT[XLSX.utils.encode_cell({ r, c: idxCo })] = { v: co, t: 's' }; }
-        else { status = isMenu ? '菜单屏缺失' : '吉客云缺失'; failCnt++; log(`[缺失] OMS:${oms} 收货人:${info.name}`, 'warn'); }
-      } else { failCnt++; }
+        // 判断是否为菜单屏订单
+        const isMenuOrder = info.mat.includes('菜单屏') || (idxMatCode !== -1 && String(wsT[XLSX.utils.encode_cell({ r, c: idxMatCode })]?.v || '').includes('F360015'));
+
+        // 匹配逻辑：优先查对应库，查不到则查备用库 (防止分类识别有误)
+        track = isMenuOrder ? (menuMap[info.name] || jikeMap[info.name]) : (jikeMap[info.name] || menuMap[info.name]);
+
+        if (track) {
+          co = parseCo(track);
+          status = '匹配成功';
+          okCnt++;
+          wsT[XLSX.utils.encode_cell({ r, c: idxTrack })] = { v: track, t: 's' };
+          wsT[XLSX.utils.encode_cell({ r, c: idxCo })] = { v: co, t: 's' };
+        } else {
+          status = isMenuOrder ? '菜单屏缺失' : '吉客云缺失';
+          failCnt++;
+          log(`[缺失] OMS:${oms} 收货人:${info.name} (${isMenuOrder ? '菜单屏库' : '吉客云库'})`, 'warn');
+        }
+      } else {
+        status = 'OMS单号不存在';
+        failCnt++;
+        log(`[跳过] 采购订单中未找到 OMS:${oms}`, 'error');
+      }
       const isDupOms = dupOmsSet.has(oms);
       viewRows.push({ 'OMS单号': oms, '收货人': info ? info.name : '未知', '匹配物流': track, '快递公司': co, '状态': isDupOms ? '⚠️ OMS重复' : status, _isDup: isDupOms, _isWarn: !track && !isDupOms });
     }
@@ -827,11 +911,11 @@ export default function App() {
 
       const downloadFn = () => {
         const wb = XLSX.utils.book_new();
-        
+
         // 动态提取模板中的原始列顺序
         const tplSheet = wbTpl.Sheets[wbTpl.SheetNames[0]];
         const tplHeaders = (XLSX.utils.sheet_to_json(tplSheet, { header: 1 })[0] as string[]) || [];
-        
+
         // 确保我们的核心字段都在里面
         const exportHeaders = tplHeaders.length > 0 ? tplHeaders : ['导入编号', '收货人', '手机', '收货地址', '应收邮资', '应收合计', '客服备注', '物流公司', '收货人信息(解析)', '业务员', '客户账号', '销售渠道名称', '结算方式'];
 
