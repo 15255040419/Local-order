@@ -1,0 +1,3 @@
+npm run dev -- --host  开启控制台
+
+ npm run build   全量编译

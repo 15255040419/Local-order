@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FTH 订单助手 - 全能校验版</title>
+    <script src="https://unpkg.com/xlsx-js-style@1.2.0/dist/xlsx.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', 'Microsoft YaHei', sans-serif; background: radial-gradient(circle at top left, #1a1c2c, #0d0e14); color: #e2e8f0; min-height: 100vh; overflow-x: hidden; }
+        .glass-card { background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); transition: all 0.3s ease; }
+        .tab-active { background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4); color: white !important;}
+        .tab-shangsong-active { background: linear-gradient(135deg, #f97316 0%, #ef4444 100%); box-shadow: 0 4px 15px rgba(249, 115, 22, 0.4); color: white !important; }
+        .upload-zone { border: 2px dashed rgba(255, 255, 255, 0.1); transition: all 0.2s ease; position: relative; cursor: pointer; }
+        .upload-zone:hover { background: rgba(255, 255, 255, 0.05); border-color: #a855f7; }
+        .upload-zone.has-cache { border-style: solid; border-color: rgba(16, 185, 129, 0.5); background: rgba(16, 185, 129, 0.05); }
+        .btn-glow { transition: all 0.3s ease; }
+        .btn-glow:not(:disabled):hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.5); }
+        
+        .preview-table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 12px; }
+        .preview-table th { background: rgba(255,255,255,0.05); padding: 10px; text-align: left; position: sticky; top: 0; z-index: 10; border-bottom: 1px solid rgba(255,255,255,0.1); white-space: nowrap;}
+        .preview-table td { padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .row-dup { background: rgba(239, 68, 68, 0.15) !important; color: #fca5a5; }
+        .row-warn { background: rgba(245, 158, 11, 0.15) !important; color: #fcd34d; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+        
+        .slide-up { animation: slideUp 0.4s ease-out; }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    </style>
+</head>
+<body class="p-6 md:p-12">
+
+    <div class="max-w-6xl mx-auto mb-8 text-center">
+        <h1 class="text-4xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">FTH 订单自动化助手</h1>
+        <p class="text-gray-400">智能纠错防呆机制 | 100% 算法重置版</p>
+    </div>
+
+    <div class="max-w-[90rem] mx-auto">
+        <!-- 标签切换 -->
+        <div class="flex justify-center mb-8 space-x-4">
+            <button onclick="switchTab('fulujia')" id="tab-fulujia" class="px-8 py-3 rounded-full font-semibold transition-all tab-active">福鹿家系列</button>
+            <button onclick="switchTab('shangsong')" id="tab-shangsong" class="px-8 py-3 rounded-full font-semibold transition-all text-gray-400 hover:text-white">商颂下单</button>
+        </div>
+
+        <div id="main-content" class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <!-- 左侧控制面板 -->
+            <div class="lg:col-span-1 space-y-6">
+                <!-- 福鹿家工具集 -->
+                <div id="panel-fulujia" class="glass-card p-5 rounded-2xl space-y-4">
+                    <div class="flex items-center justify-between">
+                        <h3 class="font-bold text-indigo-400 text-xs flex items-center"><span class="mr-1">📦</span> 福鹿家工具</h3>
+                    </div>
+                    <!-- 步骤导航 -->
+                    <div class="flex p-1 bg-black/40 rounded-xl border border-white/5">
+                        <button onclick="setStep(1)" id="btn-s1" class="flex-1 py-2 text-[10px] rounded-lg transition-all font-bold">1.提取</button>
+                        <button onclick="setStep(2)" id="btn-s2" class="flex-1 py-2 text-[10px] rounded-lg transition-all font-bold">2.生成</button>
+                        <button onclick="setStep(3)" id="btn-s3" class="flex-1 py-2 text-[10px] rounded-lg transition-all font-bold">3.回填</button>
+                    </div>
+                    
+                    <div class="space-y-4">
+                        <div id="step-info" class="text-center">
+                            <p id="step-title" class="text-xs font-bold"></p>
+                            <p id="step-desc" class="text-[9px] text-gray-500 mt-1"></p>
+                        </div>
+                        
+                        <!-- 主文件上传区 -->
+                        <div class="upload-zone p-4 rounded-xl text-center bg-white/5" id="f-main-zone" onclick="document.getElementById('f-main-input').click()">
+                            <p id="f-main-hint" class="text-[10px] text-gray-400 font-bold mb-1"></p>
+                            <span id="f-main-name" class="text-[10px] text-indigo-300">点击上传</span>
+                            <input type="file" id="f-main-input" class="hidden" onchange="handleFile(this, 'f-main-input')">
+                        </div>
+
+                        <!-- 动态内存关联提示 -->
+                        <div id="memory-alert" class="hidden bg-emerald-500/10 border border-emerald-500/30 p-2 rounded-lg text-center animate-pulse">
+                            <p id="memory-msg" class="text-[9px] text-emerald-400">✨ 数据已通过内存就绪，可直接执行</p>
+                        </div>
+
+                        <!-- 辅助配置表区 -->
+                        <div id="f-sub-files" class="space-y-2"></div>
+                        
+                        <button onclick="executeFulu()" class="w-full py-2.5 rounded-xl text-xs font-bold btn-glow transition-all shadow-lg border border-white/10 bg-indigo-600 hover:bg-indigo-500 text-white mt-2">开始执行当前步骤</button>
+                    </div>
+                </div>
+
+                <!-- 商颂工具集 -->
+                <div id="panel-shangsong" class="glass-card p-5 rounded-2xl space-y-4 hidden">
+                    <h3 class="font-bold text-orange-400 flex items-center"><span class="mr-2">🚀</span> 商颂工具</h3>
+                    
+                    <div class="upload-zone p-3 rounded-lg text-center bg-white/5" onclick="document.getElementById('s-main-input').click()">
+                        <p class="text-[10px] text-gray-400 font-bold mb-1">① 待转换订单 (商颂.xls/.xlsx)</p>
+                        <span id="s-main-name" class="text-[10px] text-orange-300">点击上传</span>
+                        <input type="file" id="s-main-input" class="hidden" onchange="handleFile(this, 's-main-input')">
+                    </div>
+                    <div class="upload-zone p-3 rounded-lg text-center bg-white/5" id="zone-s-tpl" onclick="document.getElementById('s-tpl').click()">
+                        <p class="text-[10px] text-gray-400 font-bold mb-1">② 订单分表模版.xlsx</p>
+                        <span id="s-tpl-name" class="text-[10px] text-indigo-300">点击上传 (支持记忆)</span>
+                        <input type="file" id="s-tpl" class="hidden" onchange="handleFile(this, 's-tpl', true)">
+                    </div>
+                    <div class="upload-zone p-3 rounded-lg text-center bg-white/5" id="zone-s-price" onclick="document.getElementById('s-price').click()">
+                        <p class="text-[10px] text-gray-400 font-bold mb-1">③ 快递价格明细表.xls</p>
+                        <span id="s-price-name" class="text-[10px] text-indigo-300">点击上传 (支持记忆)</span>
+                        <input type="file" id="s-price" class="hidden" onchange="handleFile(this, 's-price', true)">
+                    </div>
+                    
+                    <button onclick="processSS()" class="w-full py-3 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-400 hover:to-red-400 rounded-lg text-xs font-bold btn-glow shadow-lg text-white mt-2">开始转换生成</button>
+                </div>
+
+                <!-- 终端日志 -->
+                <div id="console" class="glass-card p-4 rounded-2xl h-48 overflow-hidden flex flex-col bg-black/50">
+                    <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 flex justify-between">
+                        <span>执行终端</span>
+                        <button onclick="document.getElementById('log-content').innerHTML=''" class="text-gray-600 hover:text-white">清空</button>
+                    </h4>
+                    <div id="log-content" class="font-mono text-[10px] space-y-1 overflow-y-auto custom-scrollbar flex-grow break-all"></div>
+                </div>
+            </div>
+
+            <!-- 右侧预览区 -->
+            <div class="lg:col-span-3 space-y-6">
+                <div id="preview-container" class="glass-card rounded-2xl p-6 min-h-[500px] flex flex-col hidden">
+                    <div class="flex justify-between items-center mb-4">
+                        <div>
+                            <h3 id="preview-title" class="text-xl font-bold flex items-center">数据预览</h3>
+                            <p id="preview-stats" class="text-xs text-indigo-300 font-mono mt-1"></p>
+                        </div>
+                        <button onclick="executeDownload()" class="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-full font-bold shadow-lg transition-all flex items-center text-white">
+                            <span class="mr-2">⬇️</span> 确认导出 Excel
+                        </button>
+                    </div>
+                    
+                    <div class="flex-grow overflow-auto custom-scrollbar border border-white/10 rounded-xl bg-black/20">
+                        <table id="data-table" class="preview-table">
+                            <thead id="table-head"></thead>
+                            <tbody id="table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 占位提示 -->
+                <div id="empty-placeholder" class="glass-card rounded-2xl h-full flex items-center justify-center text-gray-500">
+                    <div class="text-center">
+                        <div class="text-5xl mb-4 opacity-50">📊</div>
+                        <p class="text-sm">请在左侧上传文件并执行操作<br>生成的结果将在这里预览并支持下载</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed bottom-10 left-1/2 -translate-x-1/2 bg-indigo-600 px-6 py-3 rounded-full shadow-2xl opacity-0 transition-opacity pointer-events-none z-50 text-white font-bold tracking-wide"></div>
+
+    <script>
+        // ================= 全局状态与数据库 =================
+        const DB_NAME = 'FTH_Orders_DB_V3'; const STORE_NAME = 'files'; let db;
+        let memExtractedStores = null; // 用于步骤1传步骤2
+        let memPurchaseOrderWB = null; // 用于步骤1传步骤3
+        let currentDownloadFn = null;  // 动态绑定的下载函数
+        
+        let resultsMemory = { f1: null, f2: null, f3: null, ss: null };
+        let activeTab = 'fulujia', currentStep = 1;
+
+        const getDateStr = () => new Date().toISOString().split('T')[0].replace(/-/g, '');
+
+        async function initDB() { return new Promise(res => { const req = indexedDB.open(DB_NAME, 1); req.onupgradeneeded = e => e.target.result.createObjectStore(STORE_NAME); req.onsuccess = e => { db = e.target.result; res(); }; }); }
+        async function saveFileDB(id, file) { const buffer = await file.arrayBuffer(); return new Promise(res => { const tx = db.transaction(STORE_NAME, 'readwrite'); tx.objectStore(STORE_NAME).put({ name: file.name, data: buffer }, id); tx.oncomplete = res; }); }
+        async function getFileDB(id) { return new Promise(res => { const tx = db.transaction(STORE_NAME, 'readonly'); const req = tx.objectStore(STORE_NAME).get(id); req.onsuccess = () => res(req.result); }); }
+        async function getWorkbook(inputId) {
+            const input = document.getElementById(inputId);
+            if (input && input.files && input.files[0]) return XLSX.read(await input.files[0].arrayBuffer(), { type: 'array' });
+            const cached = await getFileDB(inputId);
+            return cached ? XLSX.read(cached.data, { type: 'array' }) : null;
+        }
+
+        // ================= UI与交互 =================
+        function log(msg, type = 'info') {
+            const content = document.getElementById('log-content');
+            const div = document.createElement('div'); 
+            const color = {info:'text-gray-300', success:'text-emerald-400', warn:'text-yellow-400', error:'text-red-400'}[type];
+            div.className = `${color} border-b border-white/5 pb-1`;
+            div.innerText = `[${new Date().toLocaleTimeString().split(' ')[0]}] ${msg}`; 
+            content.appendChild(div); content.scrollTop = content.scrollHeight;
+        }
+
+        function showToast(msg, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.innerText = msg;
+            toast.className = `fixed bottom-10 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full shadow-2xl transition-all z-50 text-white ${type === 'error' ? 'bg-red-600' : 'bg-emerald-500'}`;
+            toast.classList.remove('opacity-0');
+            setTimeout(() => toast.classList.add('opacity-0'), 3000);
+        }
+
+        function switchTab(tab) {
+            activeTab = tab;
+            document.getElementById('panel-fulujia').classList.toggle('hidden', tab !== 'fulujia');
+            document.getElementById('panel-shangsong').classList.toggle('hidden', tab !== 'shangsong');
+            
+            document.getElementById('tab-fulujia').className = tab === 'fulujia' ? "px-8 py-3 rounded-full font-semibold transition-all tab-active" : "px-8 py-3 rounded-full font-semibold transition-all text-gray-400 hover:text-white";
+            document.getElementById('tab-shangsong').className = tab === 'shangsong' ? "px-8 py-3 rounded-full font-semibold transition-all tab-shangsong-active" : "px-8 py-3 rounded-full font-semibold transition-all text-gray-400 hover:text-white";
+            
+            if (tab === 'fulujia') { setStep(currentStep); }
+            else { renderPreviewFromMemory('ss'); }
+        }
+
+        async function setStep(n) {
+            currentStep = n;
+            renderPreviewFromMemory('f' + n);
+            [1,2,3].forEach(i => {
+                const b = document.getElementById('btn-s'+i);
+                b.className = i===n ? "flex-1 py-2 text-[10px] rounded-lg transition-all font-bold bg-indigo-600 text-white shadow-lg" : "flex-1 py-2 text-[10px] rounded-lg transition-all font-bold text-gray-500 hover:text-gray-400";
+            });
+
+            const config = {
+                1: { title: '1. 提取门店信息', desc: '过滤重复项并提取门店', main: '厂家直发采购订单.xlsx', subs: [{id:'f-hist', label:'福鹿家总发货记录.xlsx'}] },
+                2: { title: '2. 生成 ERP 订单', desc: '根据提取的门店生成分表', main: '福鹿家_提取后门店.xlsx', subs: [{id:'f-tpl', label:'订单分表模板.xlsx'}] },
+                3: { title: '3. 回填快递单号', desc: '匹配并回填快递物流信息', main: '厂家直发采购快递单.xlsx', subs: [{id:'f-order', label:'厂家直发采购订单.xlsx'}, {id:'f-jike', label:'快递单号-吉客云.xlsx'}, {id:'f-menu', label:'快递单号-菜单屏.xlsx'}] }
+            }[n];
+
+            document.getElementById('step-title').innerText = config.title;
+            document.getElementById('step-desc').innerText = config.desc;
+            document.getElementById('f-main-hint').innerText = `[主表] ${config.main}`;
+            
+            const fileInput = document.getElementById('f-main-input');
+            document.getElementById('f-main-name').innerText = fileInput.files.length > 0 ? fileInput.files[0].name : '点击上传';
+
+            // 动态处理内存连通性提示
+            const memAlert = document.getElementById('memory-alert');
+            memAlert.classList.add('hidden');
+            if(n === 2 && memExtractedStores) { memAlert.classList.remove('hidden'); document.getElementById('memory-msg').innerText = '✨ 第1步提取数据已在内存中，无需上传主表'; }
+            
+            // 渲染辅助文件上传位
+            const subContainer = document.getElementById('f-sub-files');
+            subContainer.innerHTML = '';
+            for (const sub of config.subs) {
+                const cached = await getFileDB(sub.id);
+                // 特殊逻辑：步骤3如果内存里有步骤1的订单表，显示复用提示
+                let memTip = '';
+                if(n===3 && sub.id==='f-order' && memPurchaseOrderWB) memTip = '<span class="text-emerald-400 ml-1"> (已复用第1步源)</span>';
+
+                const div = document.createElement('div');
+                div.className = `p-2 rounded-lg flex items-center justify-between text-[10px] border border-white/5 ${cached ? 'bg-emerald-500/5' : 'bg-white/5'}`;
+                div.innerHTML = `
+                    <div class="flex-grow">
+                        <p class="text-gray-400 font-bold">${sub.label}${memTip}</p>
+                        <p id="${sub.id}-name" class="text-[8px] text-gray-500">${cached ? '已记忆: 随时可复用' : '未上传'}</p>
+                    </div>
+                    <button onclick="document.getElementById('${sub.id}').click()" class="ml-2 px-3 py-1 rounded bg-white/10 hover:bg-white/20 text-indigo-300">上传</button>
+                    <input type="file" id="${sub.id}" class="hidden" onchange="handleFile(this, '${sub.id}', true)">
+                `;
+                subContainer.appendChild(div);
+            }
+        }
+
+        // ================= 严格文件校验机制 =================
+        async function validateFile(file, idKey, step, tab) {
+            try {
+                const data = await file.arrayBuffer();
+                const wb = XLSX.read(data, { type: 'array', sheetRows: 20 }); // 只读前20行加速校验
+                const sheet = wb.Sheets[wb.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+                const headers = rows[0] ? rows[0].map(h => String(h).trim()) : [];
+                const allContentStr = rows.flat().map(c => String(c)).join(' ');
+
+                let reqHeaders = [];
+                let checkFn = null;
+                let fileNameDesc = '';
+
+                // 福鹿家主文件校验 (按步骤)
+                if (idKey === 'f-main-input') {
+                    if (step === 1) {
+                        reqHeaders = ['门店名称', '门店编码', '物料编码'];
+                        fileNameDesc = '【第1步主表】 厂家直发采购订单.xlsx';
+                    } else if (step === 2) {
+                        checkFn = () => allContentStr.includes('门店名称') && allContentStr.includes('门店编号');
+                        fileNameDesc = '【第2步主表】 福鹿家提取后门店.xlsx';
+                    } else if (step === 3) {
+                        reqHeaders = ['OMS厂家直发单号', '快递单号'];
+                        fileNameDesc = '【第3步主表】 厂家直发采购快递单.xlsx';
+                    }
+                } 
+                // 辅助文件与商颂文件校验
+                else if (idKey === 'f-hist') {
+                    checkFn = () => allContentStr.includes('编号') || allContentStr.includes('编码');
+                    fileNameDesc = '【查重文件】 福鹿家总发货记录.xlsx';
+                } else if (idKey === 'f-tpl' || idKey === 's-tpl') {
+                    checkFn = () => wb.SheetNames.includes('货品') || headers.includes('货品名称');
+                    fileNameDesc = '【模板文件】 订单分表模版.xlsx';
+                } else if (idKey === 'f-order') {
+                    reqHeaders = ['OMS厂家直发单号', '门店收货人'];
+                    fileNameDesc = '【关联文件】 厂家直发采购订单.xlsx';
+                } else if (idKey === 'f-jike') {
+                    reqHeaders = ['收货人', '物流单号'];
+                    fileNameDesc = '【单号源】 快递单号-吉客云.xlsx';
+                } else if (idKey === 'f-menu') {
+                    checkFn = () => /KY|DPK|SF|YT|ZTO|STO|JT/i.test(allContentStr);
+                    fileNameDesc = '【单号源】 快递单号-菜单屏.xlsx';
+                } else if (idKey === 's-main-input') {
+                    checkFn = () => allContentStr.includes('订单') || /\d{6}-\d+/.test(allContentStr) || /\d{12,}/.test(allContentStr);
+                    fileNameDesc = '【商颂主表】 客户发来的下单记录';
+                } else if (idKey === 's-price') {
+                    checkFn = () => allContentStr.includes('淘宝') || allContentStr.includes('省份');
+                    fileNameDesc = '【规则文件】 快递价格明细表.xls';
+                }
+
+                // 执行校验判断
+                if (reqHeaders.length > 0) {
+                    const missing = reqHeaders.filter(h => !headers.includes(h));
+                    if (missing.length > 0) {
+                        alert(`❌ 上传失败: 文件格式不匹配！\n\n📌 当前需要上传：${fileNameDesc}\n\n🔍 错误详情：缺少必要的表头列 "${missing.join(', ')}"\n💡 建议：请确认是否传串了文件，或当前处于错误的步骤。`);
+                        return false;
+                    }
+                }
+                
+                if (checkFn && !checkFn()) {
+                    alert(`❌ 上传失败: 文件内容不匹配！\n\n📌 当前需要上传：${fileNameDesc}\n\n🔍 错误详情：文件内的文字特征与预期不符。\n💡 建议：请检查是否选错了文件。`);
+                    return false;
+                }
+
+                return true;
+            } catch (e) {
+                alert('❌ 读取文件崩溃！可能是文件已损坏、加密或格式不支持。');
+                return false;
+            }
+        }
+
+        async function handleFile(input, idKey, shouldPersist = false) {
+            if (!input.files || !input.files[0]) return;
+            const file = input.files[0];
+            
+            // 核心：严格执行文件校验拦截
+            const isValid = await validateFile(file, idKey, currentStep, activeTab);
+            if (!isValid) {
+                input.value = ''; // 清空选择，强制用户重新传
+                return; 
+            }
+
+            // 更新UI
+            const spanName = document.getElementById(input.id + '-name') || document.getElementById(idKey + '-name');
+            if(spanName) { spanName.innerText = file.name; spanName.classList.add('text-white'); spanName.classList.remove('text-gray-500'); }
+            
+            log(`成功加载校验文件: ${file.name}`, 'info');
+            
+            // 步骤1如果传了主表，自动缓存供步骤3复用
+            if(currentStep === 1 && idKey === 'f-main-input') {
+                memPurchaseOrderWB = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+                log('采购订单已载入内存，供第3步智能复用', 'success');
+            }
+
+            // 存储辅助文件
+            if (shouldPersist) { 
+                await saveFileDB(idKey, file); 
+                log(`已存入记忆库，下次刷新不用再传: ${file.name}`, 'success'); 
+                if(activeTab === 'fulujia') setStep(currentStep); 
+            }
+        }
+
+        // ================= 预览与下载核心引擎 =================
+        function renderPreviewFromMemory(key) {
+            const data = resultsMemory[key];
+            if (data) renderTable(data.title, data.headers, data.rows, data.stats);
+            else {
+                document.getElementById('preview-container').classList.add('hidden');
+                document.getElementById('empty-placeholder').classList.remove('hidden');
+                currentDownloadFn = null;
+            }
+        }
+
+        function renderTable(title, headers, rows, stats) {
+            document.getElementById('empty-placeholder').classList.add('hidden');
+            const container = document.getElementById('preview-container');
+            container.classList.remove('hidden'); container.classList.add('slide-up');
+            
+            document.getElementById('preview-title').innerText = title;
+            document.getElementById('preview-stats').innerText = stats;
+
+            document.getElementById('table-head').innerHTML = `<tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>`;
+            document.getElementById('table-body').innerHTML = rows.map(r => {
+                const c = r._isDup ? 'row-dup' : (r._isWarn ? 'row-warn' : '');
+                return `<tr class="${c}">${headers.map(h => `<td>${r[h] || ''}</td>`).join('')}</tr>`;
+            }).join('');
+        }
+
+        function executeDownload() {
+            if (currentDownloadFn) { currentDownloadFn(); showToast('🎉 文件导出成功！', 'success'); }
+            else alert('没有可导出的数据，请先执行操作生成预览。');
+        }
+
+        function bindDownload(key, fn) {
+            resultsMemory[key].downloadFn = fn;
+            currentDownloadFn = fn;
+        }
+
+        // ================= 福鹿家 1: 提取门店信息 =================
+        async function executeFulu() { 
+            if(currentStep===1) await runFulu1(); 
+            else if(currentStep===2) await runFulu2(); 
+            else await runFulu3(); 
+        }
+
+        async function runFulu1() {
+            const wbOrder = memPurchaseOrderWB || await getWorkbook('f-main-input');
+            const wbHist = await getWorkbook('f-hist');
+            if(!wbOrder) return alert('请上传主文件：厂家直发采购订单.xlsx');
+
+            log('== 开始提取门店信息 ==');
+            const dfOrder = XLSX.utils.sheet_to_json(wbOrder.Sheets[wbOrder.SheetNames[0]], {defval:''});
+            const shippedCodes = new Set(); const shippedNames = {};
+
+            if(wbHist) {
+                const histData = XLSX.utils.sheet_to_json(wbHist.Sheets[wbHist.SheetNames[0]], {header:1});
+                const reg1 = /(?:门\s*店\s*)?编\s*[号码]\s*[：:]?\s*(\d{6,8})/g;
+                const reg2 = /(?<!\d)(\d{6,8})(?!\d)/g;
+                const regName = /[（(]([^）)]+?)[）)]/;
+                histData.forEach(row => {
+                    const text = row.join(' ');
+                    let match, codes = new Set();
+                    while((match = reg1.exec(text)) !== null) codes.add(match[1].slice(-6));
+                    if(codes.size === 0) while((match = reg2.exec(text)) !== null) codes.add(match[1].slice(-6));
+                    
+                    const nameMatch = text.match(regName);
+                    const sName = nameMatch ? nameMatch[1].trim() : '未知';
+                    codes.forEach(c => { shippedCodes.add(c); shippedNames[c] = sName; });
+                });
+                log(`已加载历史发货编号: ${shippedCodes.size} 个`);
+            }
+
+            const EXPECTED = {'F360010':'收银机', 'F360011':'打印机', 'F360013':'扫码盒', 'F360014':'钱箱', 'F360015':'菜单屏', 'F360022':'杯贴机'};
+            const groups = {};
+            dfOrder.forEach(r => { const n = r['门店名称']; if(n) { if(!groups[n]) groups[n] = []; groups[n].push(r); } });
+
+            const results = []; let errCount = 0;
+            for(let store in groups) {
+                const rows = groups[store];
+                const prods = {}; rows.forEach(r => prods[r['物料编码']] = r['物料名称']);
+                const hasAll = Object.keys(EXPECTED).every(k => prods[k]);
+                
+                if(hasAll && Object.keys(prods).length >= 6) {
+                    const info = rows[0];
+                    let addr = String(info['门店收货地址']||'').trim();
+                    const prov = String(info['收货省']||'').trim(), city = String(info['收货市']||'').trim(), dist = String(info['收货区']||'').trim();
+                    
+                    if(prov && !addr.startsWith(prov) && !addr.startsWith(prov.replace(/省|市|自治区/g,''))) addr = prov + addr;
+                    if(city && city !== '市辖区' && !addr.includes(city.replace('市',''))) addr = addr.replace(prov, prov+city);
+                    if(dist && !addr.includes(dist.replace(/区|县/g,''))) addr = addr.replace(city, city+dist);
+                    addr = addr.replace(/^市辖区/, '');
+
+                    const code = String(info['门店编码']||'').trim();
+                    const shortCode = code.slice(-6);
+                    const isDup = shippedCodes.has(shortCode);
+
+                    if(isDup) log(`[重复拦截] ${store} - 之前已发货 (${shippedNames[shortCode]})`, 'error');
+                    else log(`[OK] ${store} - 符合提取条件`, 'success');
+
+                    results.push({ 
+                        storeName: store, storeCode: code, address: addr, 
+                        contact: info['门店收货人'], phone: info['门店收货人电话'],
+                        _isDup: isDup
+                    });
+                } else errCount++;
+            }
+
+            memExtractedStores = results; 
+            const stats = `符合条件: ${results.length} 家 | 其中重复: ${results.filter(r=>r._isDup).length} 家 | 不符合条件跳过: ${errCount} 家`;
+            
+            const viewRows = results.map(r => ({'状态':r._isDup?'🔴 重复':'🟢 新店', '门店名称':r.storeName, '门店编号':r.storeCode, '地址':r.address, '姓名':r.contact, '电话':r.phone, _isDup: r._isDup}));
+            resultsMemory['f1'] = { title: '提取门店预览', headers: ['状态','门店名称','门店编号','姓名','电话','地址'], rows: viewRows, stats };
+            renderPreviewFromMemory('f1');
+
+            bindDownload('f1', () => {
+                const ws = XLSX.utils.aoa_to_sheet(results.map(r => [`门店名称：${r.storeName}\n门店编号：${r.storeCode}\n门店地址：${r.address}\n姓名：${r.contact}\n联系方式：${r.phone}`]));
+                ws['!cols'] = [{ wch: 60 }];
+                for(let i=0; i<results.length; i++) {
+                    const cell = ws[XLSX.utils.encode_cell({r: i, c: 0})];
+                    cell.s = { alignment: { wrapText: true, vertical: 'center' } };
+                    if(results[i]._isDup) cell.s.font = { color: { rgb: "FF0000" }, bold: true }; // 重复标红
+                }
+                const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+                XLSX.writeFile(wb, `福鹿家_${getDateStr()}_共${results.length}单.xlsx`);
+            });
+            setStep(1); 
+        }
+
+        // ================= 福鹿家 2: 生成吉客云订单 =================
+        async function runFulu2() {
+            let stores = memExtractedStores;
+            if(!stores) {
+                const wbMain = await getWorkbook('f-main-input');
+                if(!wbMain) return alert('请上传第一步提取后的 福鹿家.xlsx，或先执行第1步');
+                const raw = XLSX.utils.sheet_to_json(wbMain.Sheets[wbMain.SheetNames[0]], {header:1});
+                stores = [];
+                raw.forEach(r => {
+                    if(!r[0] || !r[0].includes('门店名称')) return;
+                    const lines = r[0].split('\n'), info = {};
+                    lines.forEach(l => { const p = l.split(/[:：]/); if(p.length>=2) info[p[0].trim()] = p.slice(1).join(':').trim(); });
+                    if(info['联系方式']) stores.push({ storeName:info['门店名称'], storeCode:info['门店编号'], address:info['门店地址'], contact:info['姓名'], phone:info['联系方式'] });
+                });
+            }
+
+            const wbTpl = await getWorkbook('f-tpl');
+            if(!wbTpl) return alert('缺少 订单分表模版.xlsx');
+            
+            log('== 开始生成吉客云订单 ==');
+            const dfProd = XLSX.utils.sheet_to_json(wbTpl.Sheets['货品']);
+            const pMap = {}; dfProd.forEach(p => pMap[p['货品名称']] = p);
+            
+            const FIXED_PRODS = ['（上海商米）D3PRO单屏', 'XP-80T（USB+蓝牙）', 'XP-235B（USB）', 'XL-2330支付盒子', 'JY-335C黑钱箱', '惠科电子菜单屏（代发）'];
+            const DEF = { '物流公司':'德邦特惠', '业务员':'王德龙', '客户账号':'鲜啤福鹿家', '销售渠道名称':'仝心科技线下批发', '结算方式':'欠款计应收' };
+
+            const orderRows = [], productRows = [];
+            const phoneCounter = {}; let totalAmt = 0;
+
+            stores.forEach(s => {
+                phoneCounter[s.phone] = (phoneCounter[s.phone] || 0) + 1;
+                let amt = 0; const pNames = [];
+                FIXED_PRODS.forEach(name => {
+                    const p = pMap[name];
+                    if(p) {
+                        amt += p['单价'];
+                        productRows.push({'导入编号(关联订单)': s.phone, '货品名称': p['货品名称'], '条码': p['条码']||'', '货品编号': p['货品编号']||'', '规格': p['规格']||'', '数量': 1, '单价': p['单价']});
+                        pNames.push(`${name}*1`);
+                    } else log(`警告: 模板中未找到货品 ${name}`, 'warn');
+                });
+                totalAmt += amt;
+                orderRows.push({
+                    '导入编号': s.phone, '收货人': '', '手机': '', '收货地址': '', '收货人信息(解析)': `${s.contact}，${s.phone}，${s.address}`,
+                    '应收邮资': 0, '应收合计': amt, '客服备注': `${pNames.join('+')} （${s.storeName} 门店编号：${s.storeCode}）`,
+                    ...DEF, _isDup: phoneCounter[s.phone] > 1
+                });
+            });
+
+            orderRows.forEach(r => { if(phoneCounter[r['导入编号']] > 1) r._isDup = true; });
+
+            resultsMemory['f2'] = { title: '生成订单预览', headers: ['导入编号','收货人信息(解析)','应收合计','客服备注','物流公司'], rows: orderRows, stats: `生成订单: ${orderRows.length} 条 | 总金额: ￥${totalAmt.toFixed(2)}` };
+            renderPreviewFromMemory('f2');
+
+            bindDownload('f2', () => {
+                const wb = XLSX.utils.book_new();
+                
+                const wsOrder = XLSX.utils.json_to_sheet(orderRows.map(r => { const o={}; Object.keys(r).forEach(k=>{if(!k.startsWith('_'))o[k]=r[k]}); return o; }));
+                wsOrder['!cols'] = Array(15).fill({wch: 20});
+                orderRows.forEach((r, i) => {
+                    if(r._isDup) { // 整行标红
+                        const range = XLSX.utils.decode_range(wsOrder['!ref']);
+                        for(let c=range.s.c; c<=range.e.c; c++) {
+                            const cell = wsOrder[XLSX.utils.encode_cell({r: i+1, c: c})];
+                            if(cell) cell.s = { font: { color: { rgb: "FF0000" }, bold: true } };
+                        }
+                    }
+                });
+                XLSX.utils.book_append_sheet(wb, wsOrder, "订单");
+
+                const wsProd = XLSX.utils.json_to_sheet(productRows);
+                wsProd['!cols'] = Array(10).fill({wch: 15});
+                XLSX.utils.book_append_sheet(wb, wsProd, "货品");
+
+                XLSX.writeFile(wb, `福鹿家订单_${getDateStr()}.xlsx`);
+            });
+        }
+
+        // ================= 福鹿家 3: 回填快递 =================
+        async function runFulu3() {
+            const wbTarget = await getWorkbook('f-main-input');
+            const wbOrder = memPurchaseOrderWB || await getWorkbook('f-order');
+            const wbJike = await getWorkbook('f-jike');
+            const wbMenu = await getWorkbook('f-menu');
+
+            if(!wbTarget || !wbOrder) return alert('缺少主文件或采购订单源！');
+            log('== 开始匹配快递单号 ==');
+
+            const orderMap = {};
+            XLSX.utils.sheet_to_json(wbOrder.Sheets[wbOrder.SheetNames[0]]).forEach(r => {
+                const oms = String(r['OMS厂家直发单号']||'').trim();
+                if(oms) orderMap[oms] = { name: String(r['门店收货人']||'').trim(), mat: String(r['物料名称']||'').trim() };
+            });
+
+            const jikeMap = {};
+            if(wbJike) XLSX.utils.sheet_to_json(wbJike.Sheets[wbJike.SheetNames[0]]).forEach(r => {
+                const n = String(r['收货人']||'').trim(), t = String(r['物流单号']||'').trim();
+                if(n && t && !jikeMap[n]) jikeMap[n] = t;
+            });
+
+            const menuMap = {};
+            if(wbMenu) {
+                const reg1 = /^(.+?)(KY|DPK|SF|YT|ZTO|STO|HTKY|JT[A-Za-z0-9]+)$/i;
+                const reg2 = /^(KY|DPK|SF|YT|ZTO|STO|HTKY|JT[A-Za-z0-9]+)(.+)$/i;
+                XLSX.utils.sheet_to_json(wbMenu.Sheets[wbMenu.SheetNames[0]], {header:1}).forEach(r => {
+                    const val = String(r[0]||'').trim();
+                    let m = val.match(reg1); if(m) { menuMap[m[1].trim()] = m[2].trim(); return; }
+                    m = val.match(reg2); if(m) { menuMap[m[2].trim()] = m[1].trim(); return; }
+                });
+            }
+
+            const parseCo = (no) => {
+                const n = no.toUpperCase();
+                if(n.startsWith('DPK')) return '德邦快递'; if(n.startsWith('KY')) return '跨越速运';
+                if(n.startsWith('SF')) return '顺丰速运'; if(n.startsWith('YT')) return '圆通快递';
+                if(n.startsWith('ZTO')) return '中通快递'; if(n.startsWith('STO')) return '申通快递';
+                if(n.startsWith('JT')) return '极兔快递'; return '其他';
+            };
+
+            const wsT = wbTarget.Sheets[wbTarget.SheetNames[0]];
+            const range = XLSX.utils.decode_range(wsT['!ref']);
+            const head = [];
+            for(let c=range.s.c; c<=range.e.c; c++) head[c] = String(wsT[XLSX.utils.encode_cell({r:range.s.r, c})]?.v || '').trim();
+            
+            const idxOms = head.indexOf('OMS厂家直发单号');
+            const idxTrack = head.indexOf('快递单号');
+            const idxCo = head.indexOf('快递公司');
+            if(idxOms===-1 || idxTrack===-1 || idxCo===-1) return alert('目标表缺少必要的列 (OMS/快递单号/快递公司)');
+
+            const viewRows = []; let okCnt = 0, failCnt = 0;
+
+            for(let r=range.s.r+1; r<=range.e.r; r++) {
+                const oms = String(wsT[XLSX.utils.encode_cell({r, c:idxOms})]?.v || '').trim();
+                if(!oms) continue;
+                
+                const info = orderMap[oms];
+                let track = '', co = '', status = '未找到';
+                if(info) {
+                    const isMenu = info.mat.includes('电子菜单屏') || String(wsT[XLSX.utils.encode_cell({r, c:head.indexOf('物料编码')})]?.v).includes('F360015');
+                    track = isMenu ? menuMap[info.name] : jikeMap[info.name];
+                    if(track) {
+                        co = parseCo(track); status = '匹配成功'; okCnt++;
+                        wsT[XLSX.utils.encode_cell({r, c:idxTrack})] = { v: track, t: 's' };
+                        wsT[XLSX.utils.encode_cell({r, c:idxCo})] = { v: co, t: 's' };
+                    } else { status = isMenu ? '菜单屏缺失' : '吉客云缺失'; failCnt++; log(`[缺失] OMS:${oms} 收货人:${info.name}`, 'warn'); }
+                } else failCnt++;
+
+                viewRows.push({ 'OMS单号':oms, '收货人': info?info.name:'未知', '匹配物流': track, '快递公司': co, '状态': status, _isWarn: !track });
+            }
+
+            resultsMemory['f3'] = { title: '回填快递预览', headers: ['OMS单号','收货人','匹配物流','快递公司','状态'], rows: viewRows, stats: `匹配成功: ${okCnt} | 匹配失败: ${failCnt}` };
+            renderPreviewFromMemory('f3');
+
+            bindDownload('f3', () => { XLSX.writeFile(wbTarget, `厂家直发采购快递单_已填写.xlsx`); });
+        }
+
+        // ================= 商颂工具 =================
+        async function processSS() {
+            const wbMain = await getWorkbook('s-main-input');
+            const wbTpl = await getWorkbook('s-tpl');
+            const wbPrice = await getWorkbook('s-price');
+            
+            if(!wbMain) return alert('请上传待转换的商颂订单');
+            if(!wbTpl) return alert('缺少订单分表模版.xlsx');
+            log('==== 开始执行商颂转换 ====');
+
+            const dfOrder = XLSX.utils.sheet_to_json(wbTpl.Sheets['订单'] || wbTpl.Sheets[0]);
+            const dfProduct = XLSX.utils.sheet_to_json(wbTpl.Sheets['货品'] || wbTpl.Sheets[1]);
+            const productMap = {}, printerPaperWidthMap = {}, paperByWidthMap = {};
+            
+            dfProduct.forEach(row => {
+                if (row['货品名称'] && row['单价'] !== undefined) {
+                    const info = { name: row['货品名称'], code: row['货品编号']||'', barcode: row['条码']||'', spec: row['规格']||'', price: parseFloat(row['单价']), paper_width: parseFloat(row['纸张宽度'])||null };
+                    productMap[row['货品名称']] = info;
+                    if(info.paper_width && !row['货品名称'].includes('纸')) printerPaperWidthMap[row['货品名称']] = info.paper_width;
+                    else if(row['货品名称'].includes('纸') && info.paper_width && !paperByWidthMap[info.paper_width]) paperByWidthMap[info.paper_width] = info;
+                }
+            });
+            
+            const defaults = { '业务员':'王德龙', '客户账号':'鲜啤福鹿家', '销售渠道名称':'仝心科技线下批发', '结算方式':'欠款计应收', '物流公司':'中通快递' };
+            if (dfOrder.length > 0) ['业务员','物流公司','客户账号','销售渠道名称','结算方式'].forEach(col => { if(dfOrder[0][col]) defaults[col] = dfOrder[0][col]; });
+
+            const expressRules = {}, postageRules = {};
+            if(wbPrice) {
+                let curPlat = '淘宝';
+                XLSX.utils.sheet_to_json(wbPrice.Sheets[wbPrice.SheetNames[0]], {header: 1}).forEach(row => {
+                    const c0 = String(row[0] || '').trim();
+                    if (c0.includes('淘宝')) curPlat = '淘宝';
+                    else if (c0.includes('多多')) curPlat = '拼多多';
+                    else if (c0 && c0 !== '省份' && c0 !== 'nan') {
+                        expressRules[`${c0}_${curPlat}`] = { '1_2kg': String(row[1]||'').trim(), '2kg_plus': String(row[2]||'').trim() };
+                        postageRules[`${c0}_${curPlat}`] = parseFloat(String(row[3]||'').replace('元','')) || 0;
+                    }
+                });
+            }
+
+            const orders = []; let curMainPlat = '淘宝';
+            XLSX.utils.sheet_to_json(wbMain.Sheets[wbMain.SheetNames[0]], {header: 1}).forEach(row => {
+                const c0 = String(row[0]||'').trim(), c1 = String(row[1]||'').trim(), c2 = String(row[2]||'').trim(), c3 = String(row[3]||'').trim();
+                if (c0.includes('订单')) { curMainPlat = c0.includes('多多') ? '拼多多' : '淘宝'; return; }
+                if (/^\d{6}-\d+$/.test(c0) || /^\d{12,}$/.test(c0)) orders.push({ id: c0, interface: c1, address: c2, remark: c3==='nan'?'':c3, platform: /^\d{6}-\d+$/.test(c0)?'拼多多':'淘宝' });
+            });
+
+            const normalize = s => s.replace(/（/g, '(').replace(/）/g, ')').toUpperCase().replace(/\s/g, '');
+            const findMatch = name => {
+                if(productMap[name]) return productMap[name];
+                const nN = normalize(name);
+                for(let k in productMap) if(normalize(k) === nN || k.includes(name) || name.includes(k)) return productMap[k];
+                return null;
+            };
+
+            const orderRows = [], productRows = []; let sumTotal = 0, sumPost = 0;
+            orders.forEach(order => {
+                const lines = order.interface.split('\n');
+                const mList = [], ips = []; let pTotal = 0;
+                const prnByW = {}, pprByW = {};
+
+                lines.forEach(line => {
+                    line = line.trim(); if(!line || ['送网线','网线','收据','测试纸','顺丰到付'].some(f=>line.includes(f))) return;
+                    const ipM = line.match(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/g) || []; ips.push(...ipM);
+                    const clean = line.replace(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/g, '').trim();
+                    const m = clean.match(/^(.+?)\s*\*\s*(\d+)\s*$/);
+                    const name = m?m[1].trim():clean, qty = m?parseInt(m[2]):1;
+                    
+                    const prod = findMatch(name);
+                    if(prod) {
+                        const price = prod.price * qty; pTotal += price; sumTotal += price;
+                        mList.push({name:prod.name, price:prod.price, qty});
+                        productRows.push({'导入编号(关联订单)': order.id, '货品名称': prod.name, '条码': prod.barcode, '货品编号': prod.code, '规格': prod.spec, '数量': qty, '单价': prod.price});
+                        
+                        if(prod.price>50 && !prod.name.includes('纸')) { const w = printerPaperWidthMap[prod.name]||80; prnByW[w] = (prnByW[w]||0)+qty; }
+                        else if(prod.name.includes('纸') && prod.paper_width) pprByW[prod.paper_width] = (pprByW[prod.paper_width]||0)+qty;
+                    } else log(`未找到: ${name}`, 'error');
+                });
+
+                for(let w in prnByW) {
+                    const toAdd = Math.max(0, prnByW[w] - (pprByW[w]||0)); const pPaper = paperByWidthMap[w];
+                    if(toAdd > 0 && pPaper) {
+                        log(`[补纸] 订单 ${order.id.slice(-6)} 补 ${pPaper.name}*${toAdd}`, 'warn');
+                        const price = pPaper.price * toAdd; pTotal += price; sumTotal += price;
+                        mList.push({name:pPaper.name, qty:toAdd});
+                        productRows.push({'导入编号(关联订单)': order.id, '货品名称': pPaper.name, '条码': pPaper.barcode, '货品编号': pPaper.code, '规格': pPaper.spec, '数量': toAdd, '单价': pPaper.price});
+                    }
+                }
+
+                const provMatch = ['北京','天津','上海','重庆','河北','山西','辽宁','吉林','黑龙江','江苏','浙江','安徽','福建','江西','山东','河南','湖北','湖南','广东','海南','四川','贵州','云南','陕西','甘肃','青海','台湾','内蒙古','广西','西藏','宁夏','新疆'].find(p=>order.address.includes(p));
+                let expCo = defaults['物流公司'], post = 0;
+                if(provMatch && wbPrice) {
+                    const wC = mList.reduce((a,p)=>a+(p.price>50&&!p.name.includes('纸')?p.qty:0),0)>=2 ? '2kg_plus':'1_2kg';
+                    const k = `${provMatch}_${order.platform}`;
+                    if(expressRules[k]) { expCo = expressRules[k][wC]; post = postageRules[k]||0; }
+                }
+                sumPost += post;
+
+                const mgMap = {}; mList.forEach(p=>mgMap[p.name]=(mgMap[p.name]||0)+p.qty);
+                let rem = Object.entries(mgMap).map(([n,q])=>`${n}*${q}`).join('+');
+                if(ips.length) rem += ` 改IP：${[...new Set(ips)].join(',')}`;
+                if(order.remark) rem += ` ${order.remark}`;
+
+                orderRows.push({'导入编号': order.id, '收货人': '', '手机': '', '收货地址': '', '收货人信息(解析)': order.address, '应收邮资': post, '应收合计': pTotal+post, '客服备注': rem, '物流公司': expCo, ...defaults, _isWarn: !provMatch});
+            });
+
+            resultsMemory['ss'] = { title: '商颂订单预览', headers: ['导入编号','收货人信息(解析)','应收邮资','应收合计','客服备注','物流公司'], rows: orderRows, stats: `总单: ${orders.length} | 货品: ￥${sumTotal.toFixed(2)} | 邮资: ￥${sumPost.toFixed(2)}` };
+            renderPreviewFromMemory('ss');
+
+            bindDownload('ss', () => {
+                const wb = XLSX.utils.book_new();
+                const wsOrder = XLSX.utils.json_to_sheet(orderRows.map(r => { const o={}; Object.keys(r).forEach(k=>{if(!k.startsWith('_'))o[k]=r[k]}); return o; }));
+                wsOrder['!cols'] = Array(12).fill({wch: 18}); XLSX.utils.book_append_sheet(wb, wsOrder, "订单");
+                const wsProd = XLSX.utils.json_to_sheet(productRows);
+                wsProd['!cols'] = Array(8).fill({wch: 15}); XLSX.utils.book_append_sheet(wb, wsProd, "货品");
+                XLSX.writeFile(wb, `商颂订单_${getDateStr()}.xlsx`);
+            });
+        }
+
+        window.onload = async () => { await initDB(); setStep(1); showToast('🚀 校验引擎已就绪'); };
+    </script>
+</body>
+</html>
