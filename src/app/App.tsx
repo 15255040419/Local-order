@@ -21,6 +21,15 @@ interface StoreInfo {
 }
 interface LogEntry { time: string; message: string; type: 'info' | 'success' | 'warn' | 'error'; }
 interface PreviewData { title: string; headers: string[]; rows: any[]; stats: string; }
+interface FuluProduct {
+  name: string;
+  barcode: string;
+  code: string;
+  spec: string;
+  qty: number;
+  price: number;
+}
+
 interface ErrorModal { title: string; desc?: string; }
 
 const getDateStr = () => new Date().toISOString().split('T')[0].replace(/-/g, '');
@@ -122,8 +131,13 @@ export default function App() {
     'F360010': '收银机', 'F360011': '小票打印机（蓝牙）', 'F360013': '扫码盒子',
     'F360014': '钱箱', 'F360015': '电子菜单屏', 'F360022': '杯贴打印机（235B）'
   });
-  const [fuluFixed, setFuluFixed] = useState<string[]>([
-    '（上海商米）D3PRO单屏', 'XP-80T（USB+蓝牙）', 'XP-235B（USB）', 'XL-2330支付盒子', 'JY-335C黑钱箱', '惠科电子菜单屏（代发）'
+  const [fuluFixed, setFuluFixed] = useState<FuluProduct[]>([
+    { name: '（上海商米）D3PRO单屏', barcode: '', code: '', spec: '', qty: 1, price: 0 },
+    { name: 'XP-80T（USB+蓝牙）', barcode: '', code: '', spec: '', qty: 1, price: 0 },
+    { name: 'XP-235B（USB）', barcode: '', code: '', spec: '', qty: 1, price: 0 },
+    { name: 'XL-2330支付盒子', barcode: '', code: '', spec: '', qty: 1, price: 0 },
+    { name: 'JY-335C黑钱箱', barcode: '', code: '', spec: '', qty: 1, price: 0 },
+    { name: '惠科电子菜单屏（代发）', barcode: '', code: '', spec: '', qty: 1, price: 0 }
   ]);
 
   const dbRef = useRef<IDBDatabase | null>(null);
@@ -167,7 +181,15 @@ export default function App() {
     expReq.onsuccess = () => { if (expReq.result) setFuluExpected(expReq.result); };
 
     const fixReq = store.get('fuluFixed');
-    fixReq.onsuccess = () => { if (fixReq.result) setFuluFixed(fixReq.result); };
+    fixReq.onsuccess = () => {
+      if (fixReq.result && Array.isArray(fixReq.result)) {
+        const normalized = fixReq.result.map(p => {
+          if (typeof p === 'string') return { name: p, barcode: '', code: '', spec: '', qty: 1, price: 0 };
+          return p;
+        });
+        setFuluFixed(normalized);
+      }
+    };
   };
 
   const saveConfig = async (key: string, val: any) => {
@@ -593,21 +615,7 @@ export default function App() {
     const pMap: Record<string, any> = {};
     (dfProd as any[]).forEach((p: any) => (pMap[p['货品名称']] = p));
 
-    const FIXED_PRODS = (fuluFixed as any[]).map(p => {
-      if (typeof p === 'string') {
-        const info = pMap[p];
-        if (info) return {
-          name: p,
-          barcode: String(info['条码'] || '').trim(),
-          code: String(info['货品编号'] || info['编码'] || '').trim(),
-          spec: String(info['规格'] || '').trim(),
-          qty: 1,
-          price: parseFloat(info['单价']) || 0
-        };
-        return { name: p, qty: 1, price: 0 };
-      }
-      return p;
-    }).filter(p => p && p.name);
+    const FIXED_PRODS = fuluFixed.filter(p => p && p.name);
     const DEF: Record<string, string> = { '物流公司': '德邦特惠', '业务员': '王德龙', '客户账号': '鲜啤福鹿家', '销售渠道名称': '仝心科技线下批发', '结算方式': '欠款计应收' };
 
     const orderRows: any[] = [];
@@ -621,8 +629,8 @@ export default function App() {
       const pNames: string[] = [];
       FIXED_PRODS.forEach(p => {
         if (p && p.name) {
-          const price = parseFloat(p.price) || 0;
-          const qty = parseInt(p.qty) || 1;
+          const price = p.price || 0;
+          const qty = p.qty || 1;
           amt += price * qty;
           productRows.push({
             '导入编号(关联订单)': s.phone,
@@ -1262,12 +1270,12 @@ export default function App() {
                     <tbody className={isDark ? 'divide-y divide-white/5' : 'divide-y divide-black/5'}>
                       {fuluFixed.map((p, idx) => (
                         <tr key={idx} className={isDark ? 'hover:bg-white/2' : 'hover:bg-gray-50/50'}>
-                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-white' : 'text-gray-900'}`} value={p.name} onChange={e => { const next = [...fuluFixed]; next[idx].name = e.target.value; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
-                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-gray-400 font-mono' : 'text-gray-500 font-mono'}`} value={p.barcode} onChange={e => { const next = [...fuluFixed]; next[idx].barcode = e.target.value; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
-                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-gray-400 font-mono' : 'text-gray-500 font-mono'}`} value={p.code} onChange={e => { const next = [...fuluFixed]; next[idx].code = e.target.value; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
-                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-gray-400' : 'text-gray-500'}`} value={p.spec} onChange={e => { const next = [...fuluFixed]; next[idx].spec = e.target.value; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
-                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-white font-medium' : 'text-gray-900 font-medium'}`} value={p.qty} onChange={e => { const next = [...fuluFixed]; next[idx].qty = e.target.value; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
-                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-green-400 font-medium' : 'text-green-600 font-medium'}`} value={p.price} onChange={e => { const next = [...fuluFixed]; next[idx].price = e.target.value; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
+                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-white' : 'text-gray-900'}`} value={p.name} onChange={e => { const next = [...fuluFixed]; next[idx] = { ...next[idx], name: e.target.value }; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
+                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-gray-400 font-mono' : 'text-gray-500 font-mono'}`} value={p.barcode} onChange={e => { const next = [...fuluFixed]; next[idx] = { ...next[idx], barcode: e.target.value }; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
+                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-gray-400 font-mono' : 'text-gray-500 font-mono'}`} value={p.code} onChange={e => { const next = [...fuluFixed]; next[idx] = { ...next[idx], code: e.target.value }; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
+                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-gray-400' : 'text-gray-500'}`} value={p.spec} onChange={e => { const next = [...fuluFixed]; next[idx] = { ...next[idx], spec: e.target.value }; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
+                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-white font-medium' : 'text-gray-900 font-medium'}`} value={String(p.qty)} onChange={e => { const next = [...fuluFixed]; next[idx] = { ...next[idx], qty: parseInt(e.target.value) || 0 }; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
+                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-green-400 font-medium' : 'text-green-600 font-medium'}`} value={String(p.price)} onChange={e => { const next = [...fuluFixed]; next[idx] = { ...next[idx], price: parseFloat(e.target.value) || 0 }; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
                         </tr>
                       ))}
                     </tbody>
@@ -1300,7 +1308,7 @@ export default function App() {
                 <span className="text-white text-xs font-bold">FT</span>
               </div>
               <span className={`font-semibold tracking-tight ${isDark ? 'text-white' : 'text-gray-900'}`}>FTH 订单自动化助手</span>
-              <span className={`text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-white/8 text-gray-400' : 'bg-gray-100 text-gray-500'}`}>v3.3</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-white/8 text-gray-400' : 'bg-gray-100 text-gray-500'}`}>v4.0</span>
             </div>
             <div className="flex items-center gap-3">
               {/* Log button */}
