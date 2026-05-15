@@ -1,8 +1,8 @@
-# FTH 订单自动化助手 (FTH Order Automation Assistant) v3.0
+# FTH 订单自动化助手 (FTH Order Automation Assistant) v3.3
 
 一个基于 React + Vite 开发的高效订单处理工具，专为物流订单自动化设计。支持福鹿家系列订单处理及商颂下单转换，具备智能查重、规则匹配及一键导出功能。
 
-![Version](https://img.shields.io/badge/version-3.0-blue)
+![Version](https://img.shields.io/badge/version-3.3-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## 核心特性

@@ -4,13 +4,14 @@ import { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx-js-style';
 import {
   Upload, FileCheck, Download, Trash2, CheckCircle2, Loader2,
-  Sun, Moon, ChevronDown, ChevronUp, X, AlertTriangle, Terminal
+  Sun, Moon, ChevronDown, ChevronUp, X, AlertTriangle, Terminal, Settings
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 
 /* ─────────────────────────── Constants ─────────────────────────── */
 const DB_NAME = 'FTH_Orders_DB_V3';
 const STORE_NAME = 'files';
+const CONFIG_STORE = 'config'; // New store for settings
 
 /* ─────────────────────────── Types ─────────────────────────── */
 interface FileCache { name: string; data: ArrayBuffer; }
@@ -114,6 +115,16 @@ export default function App() {
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, File | null>>({});
   const [cachedFiles, setCachedFiles] = useState<Record<string, boolean>>({});
   const [errorModal, setErrorModal] = useState<ErrorModal | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Fulu Product Settings
+  const [fuluExpected, setFuluExpected] = useState<Record<string, string>>({
+    'F360010': '收银机', 'F360011': '小票打印机（蓝牙）', 'F360013': '扫码盒子',
+    'F360014': '钱箱', 'F360015': '电子菜单屏', 'F360022': '杯贴打印机（235B）'
+  });
+  const [fuluFixed, setFuluFixed] = useState<string[]>([
+    '（上海商米）D3PRO单屏', 'XP-80T（USB+蓝牙）', 'XP-235B（USB）', 'XL-2330支付盒子', 'JY-335C黑钱箱', '惠科电子菜单屏（代发）'
+  ]);
 
   const dbRef = useRef<IDBDatabase | null>(null);
   const memExtractedStoresRef = useRef<StoreInfo[] | null>(null);
@@ -136,13 +147,33 @@ export default function App() {
       req.onupgradeneeded = (e) => {
         const db = (e.target as IDBOpenDBRequest).result;
         if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
+        if (!db.objectStoreNames.contains(CONFIG_STORE)) db.createObjectStore(CONFIG_STORE);
       };
       req.onsuccess = async (e) => {
         dbRef.current = (e.target as IDBOpenDBRequest).result;
         await loadCachedFilesList();
+        await loadConfig();
         resolve();
       };
     });
+  };
+
+  const loadConfig = async () => {
+    if (!dbRef.current) return;
+    const tx = dbRef.current.transaction(CONFIG_STORE, 'readonly');
+    const store = tx.objectStore(CONFIG_STORE);
+
+    const expReq = store.get('fuluExpected');
+    expReq.onsuccess = () => { if (expReq.result) setFuluExpected(expReq.result); };
+
+    const fixReq = store.get('fuluFixed');
+    fixReq.onsuccess = () => { if (fixReq.result) setFuluFixed(fixReq.result); };
+  };
+
+  const saveConfig = async (key: string, val: any) => {
+    if (!dbRef.current) return;
+    const tx = dbRef.current.transaction(CONFIG_STORE, 'readwrite');
+    tx.objectStore(CONFIG_STORE).put(val, key);
   };
 
   const loadCachedFilesList = async () => {
@@ -246,7 +277,7 @@ export default function App() {
           // 回填目标表：特征是必须有 OMS单号 + 快递单号 + 快递公司
           const isTarget = headers.includes('OMS厂家直发单号') && headers.includes('快递单号') && headers.includes('快递公司');
           const isSource = headers.includes('OMS厂家直发单号') && headers.includes('门店收货人');
-          
+
           if (isSource && !isTarget) {
             showError('上传位置错误', '检测到您在此处上传了【采购订单/数据源】，请在此处上传【厂家直发采购快递单】（回填目标表）');
             return false;
@@ -316,6 +347,36 @@ export default function App() {
       delete resultsMemoryRef.current['f2'];
       log('采购订单已载入内存，已重置后续步骤缓存', 'success');
     }
+
+    // Auto-sync Fulu Fixed Products from Template
+    if (idKey === 'f-tpl' || idKey === 's-tpl') {
+      try {
+        const buffer = await file.arrayBuffer();
+        const wb = XLSX.read(buffer, { type: 'array' });
+        const sheet = wb.Sheets['货品'] || wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet) as any[];
+
+        if (rows.length > 0) {
+          const newFixed = rows.slice(0, 6).map(r => ({
+            name: String(r['货品名称'] || r['名称'] || '').trim(),
+            barcode: String(r['条码'] || '').trim(),
+            code: String(r['货品编号'] || r['编码'] || '').trim(),
+            spec: String(r['规格'] || '').trim(),
+            qty: parseInt(r['数量']) || 1,
+            price: parseFloat(r['单价']) || 0
+          })).filter(p => p.name);
+
+          if (newFixed.length > 0) {
+            setFuluFixed(newFixed);
+            await saveConfig('fuluFixed', newFixed);
+            log(`已从模版自动同步 ${newFixed.length} 个货品配置`, 'success');
+          }
+        }
+      } catch (err) {
+        console.error('Failed to sync template:', err);
+      }
+    }
+
     if (idKey === 'f-main-s2') {
       delete resultsMemoryRef.current['f2'];
       log('手动上传了门店文件，Step 2 将优先使用此文件', 'warn');
@@ -389,10 +450,7 @@ export default function App() {
       if (samples.length > 0) log(`历史编号示例 (后6位): ${samples.join(', ')}`, 'info');
     }
 
-    const EXPECTED: Record<string, string> = {
-      'F360010': '收银机', 'F360011': '小票打印机（蓝牙）', 'F360013': '扫码盒子',
-      'F360014': '钱箱', 'F360015': '电子菜单屏', 'F360022': '杯贴打印机（235B）'
-    };
+    const EXPECTED = fuluExpected;
 
     const groups: Record<string, any[]> = {};
     (dfOrder as any[]).forEach((r: any) => {
@@ -535,7 +593,21 @@ export default function App() {
     const pMap: Record<string, any> = {};
     (dfProd as any[]).forEach((p: any) => (pMap[p['货品名称']] = p));
 
-    const FIXED_PRODS = ['（上海商米）D3PRO单屏', 'XP-80T（USB+蓝牙）', 'XP-235B（USB）', 'XL-2330支付盒子', 'JY-335C黑钱箱', '惠科电子菜单屏（代发）'];
+    const FIXED_PRODS = (fuluFixed as any[]).map(p => {
+      if (typeof p === 'string') {
+        const info = pMap[p];
+        if (info) return {
+          name: p,
+          barcode: String(info['条码'] || '').trim(),
+          code: String(info['货品编号'] || info['编码'] || '').trim(),
+          spec: String(info['规格'] || '').trim(),
+          qty: 1,
+          price: parseFloat(info['单价']) || 0
+        };
+        return { name: p, qty: 1, price: 0 };
+      }
+      return p;
+    }).filter(p => p && p.name);
     const DEF: Record<string, string> = { '物流公司': '德邦特惠', '业务员': '王德龙', '客户账号': '鲜啤福鹿家', '销售渠道名称': '仝心科技线下批发', '结算方式': '欠款计应收' };
 
     const orderRows: any[] = [];
@@ -547,17 +619,26 @@ export default function App() {
       phoneCounter[s.phone] = (phoneCounter[s.phone] || 0) + 1;
       let amt = 0;
       const pNames: string[] = [];
-      FIXED_PRODS.forEach(name => {
-        const p = pMap[name];
-        if (p) {
-          amt += p['单价'];
-          productRows.push({ '导入编号(关联订单)': s.phone, '货品名称': p['货品名称'], '条码': p['条码'] || '', '货品编号': p['货品编号'] || '', '规格': p['规格'] || '', '数量': 1, '单价': p['单价'] });
-          pNames.push(`${name}*1`);
+      FIXED_PRODS.forEach(p => {
+        if (p && p.name) {
+          const price = parseFloat(p.price) || 0;
+          const qty = parseInt(p.qty) || 1;
+          amt += price * qty;
+          productRows.push({
+            '导入编号(关联订单)': s.phone,
+            '货品名称': p.name,
+            '条码': p.barcode || '',
+            '货品编号': p.code || '',
+            '规格': p.spec || '',
+            '数量': qty,
+            '单价': price
+          });
+          pNames.push(`${p.name}*${qty}`);
         }
       });
       totalAmt += amt;
       const isDup = s._isDup || phoneCounter[s.phone] > 1;
-      orderRows.push({ '导入编号': s.phone, '收货人': '', '手机': '', '收货地址': '', '收货人信息(解析)': `${s.contact}，${s.phone}，${s.address}`, '应收邮资': 0, '应收合计': amt, '客服备注': `${pNames.join('+')} （${s.storeName} 门店编号：${s.storeCode}）`, ...DEF, _isDup: isDup });
+      orderRows.push({ '导入编号': s.phone, '收货人': '', '手机': '', '收货地址': '', '收货人信息(解析)': `${s.contact}，${s.phone}，${s.address}`, '应收邮资': 0, '应收合计': amt, '客服备注': '', '客户备注': `${s.storeName} 门店编号：${s.storeCode}`, ...DEF, _isDup: isDup });
     });
     orderRows.forEach(r => { if (phoneCounter[r['导入编号']] > 1) r._isDup = true; });
 
@@ -568,7 +649,7 @@ export default function App() {
     });
 
     const dupCount2 = orderRows.filter(r => r._isDup).length;
-    const pd: PreviewData = { title: '生成订单预览', headers: ['导入编号', '收货人信息(解析)', '应收合计', '客服备注', '物流公司'], rows: orderRows, stats: `生成订单: ${orderRows.length} 条 | 总金额: ￥${totalAmt.toFixed(2)} | 重复: ${dupCount2} 条` };
+    const pd: PreviewData = { title: '生成订单预览', headers: ['导入编号', '收货人信息(解析)', '应收合计', '客服备注', '客户备注', '物流公司'], rows: orderRows, stats: `生成订单: ${orderRows.length} 条 | 总金额: ￥${totalAmt.toFixed(2)} | 重复: ${dupCount2} 条` };
 
     const downloadFn = () => {
       const wb = XLSX.utils.book_new();
@@ -680,7 +761,8 @@ export default function App() {
       let track = ''; let co = ''; let status = '未找到';
       if (info) {
         // 判断是否为菜单屏订单
-        const isMenuOrder = info.mat.includes('菜单屏') || (idxMatCode !== -1 && String(wsT[XLSX.utils.encode_cell({ r, c: idxMatCode })]?.v || '').includes('F360015'));
+        const menuCode = Object.keys(fuluExpected).find(k => fuluExpected[k].includes('菜单屏')) || 'F360015';
+        const isMenuOrder = info.mat.includes('菜单屏') || (idxMatCode !== -1 && String(wsT[XLSX.utils.encode_cell({ r, c: idxMatCode })]?.v || '').includes(menuCode));
 
         // 匹配逻辑：优先查对应库，查不到则查备用库 (防止分类识别有误)
         track = isMenuOrder ? (menuMap[info.name] || jikeMap[info.name]) : (jikeMap[info.name] || menuMap[info.name]);
@@ -891,7 +973,7 @@ export default function App() {
           ...defaults,
           '导入编号': order.id, '收货人': '', '手机': '', '收货地址': '',
           '收货人信息(解析)': order.address, '应收邮资': post,
-          '应收合计': pTotal + post, '客服备注': rem, '物流公司': expCo,
+          '应收合计': pTotal + post, '客服备注': '', '客户备注': order.remark || '', '物流公司': expCo,
           _isWarn: !prov || !expCo
         });
       });
@@ -907,7 +989,7 @@ export default function App() {
       });
 
       const dupCountSS = orderRows.filter(r => r._isDup).length;
-      const pd: PreviewData = { title: '商颂订单预览', headers: ['导入编号', '收货人信息(解析)', '应收邮资', '应收合计', '客服备注', '物流公司'], rows: orderRows, stats: `总单: ${orders.length} | 货品: ￥${sumTotal.toFixed(2)} | 邮资: ￥${sumPost.toFixed(2)} | 重复: ${dupCountSS} 条` };
+      const pd: PreviewData = { title: '商颂订单预览', headers: ['导入编号', '收货人信息(解析)', '应收邮资', '应收合计', '客服备注', '客户备注', '物流公司'], rows: orderRows, stats: `总单: ${orders.length} | 货品: ￥${sumTotal.toFixed(2)} | 邮资: ￥${sumPost.toFixed(2)} | 重复: ${dupCountSS} 条` };
 
       const downloadFn = () => {
         const wb = XLSX.utils.book_new();
@@ -917,7 +999,19 @@ export default function App() {
         const tplHeaders = (XLSX.utils.sheet_to_json(tplSheet, { header: 1 })[0] as string[]) || [];
 
         // 确保我们的核心字段都在里面
-        const exportHeaders = tplHeaders.length > 0 ? tplHeaders : ['导入编号', '收货人', '手机', '收货地址', '应收邮资', '应收合计', '客服备注', '物流公司', '收货人信息(解析)', '业务员', '客户账号', '销售渠道名称', '结算方式'];
+        const baseHeaders = ['导入编号', '收货人', '手机', '收货地址', '应收邮资', '应收合计', '客服备注', '客户备注', '物流公司', '收货人信息(解析)', '业务员', '客户账号', '销售渠道名称', '结算方式'];
+        let exportHeaders = tplHeaders.length > 0 ? [...tplHeaders] : baseHeaders;
+
+        // 关键修复：如果模板里漏了“客户备注”，则自动插入到“客服备注”后面或末尾
+        if (!exportHeaders.includes('客户备注')) {
+          const kfIdx = exportHeaders.indexOf('客服备注');
+          if (kfIdx !== -1) exportHeaders.splice(kfIdx + 1, 0, '客户备注');
+          else exportHeaders.push('客户备注');
+        }
+        // 同样确保“物流公司”也存在
+        if (!exportHeaders.includes('物流公司')) {
+          exportHeaders.push('物流公司');
+        }
 
         const wsOrder = XLSX.utils.json_to_sheet(orderRows.map(r => {
           const o: any = {};
@@ -1094,6 +1188,106 @@ export default function App() {
         </div>
       )}
 
+      {/* ── Settings Modal ── */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(12px)' }} onClick={() => setShowSettings(false)}>
+          <div className={`relative w-full max-w-5xl rounded-3xl shadow-2xl border overflow-hidden animate-in fade-in zoom-in-95 duration-200 ${isDark ? 'bg-[#2c2c2e] border-white/12' : 'bg-white border-black/8'}`} onClick={e => e.stopPropagation()}>
+            <div className={`px-6 py-4 border-b flex items-center justify-between ${isDark ? 'border-white/8 bg-white/2' : 'border-black/5 bg-gray-50/50'}`}>
+              <div className="flex items-center gap-2">
+                <Settings className={`w-4 h-4 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} />
+                <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>货品配置</h3>
+              </div>
+              <button onClick={() => setShowSettings(false)} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${isDark ? 'hover:bg-white/10 text-gray-500' : 'hover:bg-gray-100 text-gray-400'}`}>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+              {/* Expected Products */}
+              <div>
+                <h4 className={`text-sm font-bold mb-3 flex items-center gap-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                  1. 门店提取校验 (物料编码 + 名称)
+                  <span className="text-[10px] font-normal px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500">Step 1 使用</span>
+                </h4>
+                <div className="grid grid-cols-2 gap-3">
+                  {Object.entries(fuluExpected).map(([code, name], idx) => (
+                    <div key={idx} className="flex gap-2">
+                      <input
+                        className={`flex-1 px-3 py-2 rounded-lg text-xs font-mono border transition-all ${T.input(isDark)}`}
+                        value={code}
+                        placeholder="物料编码"
+                        onChange={e => {
+                          const next = { ...fuluExpected };
+                          delete next[code];
+                          next[e.target.value] = name;
+                          setFuluExpected(next);
+                          saveConfig('fuluExpected', next);
+                        }}
+                      />
+                      <input
+                        className={`flex-1 px-3 py-2 rounded-lg text-xs border transition-all ${T.input(isDark)}`}
+                        value={name}
+                        placeholder="货品名称"
+                        onChange={e => {
+                          const next = { ...fuluExpected, [code]: e.target.value };
+                          setFuluExpected(next);
+                          saveConfig('fuluExpected', next);
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className={`h-px ${isDark ? 'bg-white/5' : 'bg-black/5'}`} />
+
+              {/* Fixed Products */}
+              <div>
+                <h4 className={`text-sm font-bold mb-3 flex items-center gap-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                  2. 导出订单货品 (表格格式)
+                  <span className="text-[10px] font-normal px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-500">Step 2 使用</span>
+                </h4>
+                <div className={`overflow-hidden rounded-xl border ${isDark ? 'border-white/10' : 'border-black/5'}`}>
+                  <table className="w-full text-[11px] border-collapse">
+                    <thead>
+                      <tr className={`${isDark ? 'bg-white/5 text-gray-400' : 'bg-gray-50 text-gray-500'}`}>
+                        <th className="px-4 py-3 text-left font-semibold">货品名称</th>
+                        <th className="px-4 py-3 text-left font-semibold w-40">条码</th>
+                        <th className="px-4 py-3 text-left font-semibold w-32">货品编号</th>
+                        <th className="px-4 py-3 text-left font-semibold w-32">规格</th>
+                        <th className="px-4 py-3 text-left font-semibold w-20">数量</th>
+                        <th className="px-4 py-3 text-left font-semibold w-24">单价</th>
+                      </tr>
+                    </thead>
+                    <tbody className={isDark ? 'divide-y divide-white/5' : 'divide-y divide-black/5'}>
+                      {fuluFixed.map((p, idx) => (
+                        <tr key={idx} className={isDark ? 'hover:bg-white/2' : 'hover:bg-gray-50/50'}>
+                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-white' : 'text-gray-900'}`} value={p.name} onChange={e => { const next = [...fuluFixed]; next[idx].name = e.target.value; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
+                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-gray-400 font-mono' : 'text-gray-500 font-mono'}`} value={p.barcode} onChange={e => { const next = [...fuluFixed]; next[idx].barcode = e.target.value; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
+                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-gray-400 font-mono' : 'text-gray-500 font-mono'}`} value={p.code} onChange={e => { const next = [...fuluFixed]; next[idx].code = e.target.value; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
+                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-gray-400' : 'text-gray-500'}`} value={p.spec} onChange={e => { const next = [...fuluFixed]; next[idx].spec = e.target.value; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
+                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-white font-medium' : 'text-gray-900 font-medium'}`} value={p.qty} onChange={e => { const next = [...fuluFixed]; next[idx].qty = e.target.value; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
+                          <td className="px-2 py-2"><input className={`w-full px-2 py-1.5 rounded-lg bg-transparent focus:bg-blue-500/5 outline-none transition-colors ${isDark ? 'text-green-400 font-medium' : 'text-green-600 font-medium'}`} value={p.price} onChange={e => { const next = [...fuluFixed]; next[idx].price = e.target.value; setFuluFixed(next); saveConfig('fuluFixed', next); }} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div className={`p-4 border-t text-center ${isDark ? 'border-white/8 bg-white/2' : 'border-black/5 bg-gray-50/30'}`}>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="px-8 py-2 rounded-xl bg-[#007AFF] text-white text-sm font-semibold hover:bg-[#0071e3] transition-all"
+              >
+                保存并关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Main Layout ── */}
       <div className={`min-h-screen ${T.bg(isDark)} transition-colors duration-300`} style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif' }}>
 
@@ -1106,7 +1300,7 @@ export default function App() {
                 <span className="text-white text-xs font-bold">FT</span>
               </div>
               <span className={`font-semibold tracking-tight ${isDark ? 'text-white' : 'text-gray-900'}`}>FTH 订单自动化助手</span>
-              <span className={`text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-white/8 text-gray-400' : 'bg-gray-100 text-gray-500'}`}>v3.0</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-white/8 text-gray-400' : 'bg-gray-100 text-gray-500'}`}>v3.3</span>
             </div>
             <div className="flex items-center gap-3">
               {/* Log button */}
@@ -1118,6 +1312,14 @@ export default function App() {
                 <Terminal className="w-3.5 h-3.5" />
                 终端
                 {logs.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-[#007AFF] rounded-full text-[9px] text-white flex items-center justify-center">{logs.length > 99 ? '99' : logs.length}</span>}
+              </button>
+              {/* Settings button */}
+              <button
+                onClick={() => setShowSettings(true)}
+                className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all
+                  ${isDark ? 'bg-white/8 hover:bg-white/14 text-gray-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-600'}`}
+              >
+                <Settings className="w-4 h-4" />
               </button>
               {/* Theme toggle */}
               <button
